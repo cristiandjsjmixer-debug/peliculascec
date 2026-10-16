@@ -1,8 +1,5 @@
 from flask import Flask, request, redirect
 import re
-import time
-import random
-import string
 import requests
 from bs4 import BeautifulSoup
 
@@ -12,36 +9,38 @@ def obtener_enlace_fresco(url):
     session = requests.Session()
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Referer': url
     }
     
-    if '/d/' in url:
-        url_embed = url.replace('/d/', '/e/')
-    else:
-        url_embed = url
-
-    headers['Referer'] = url_embed
     try:
-        res_embed = session.get(url_embed, headers=headers, timeout=10)
-        html_embed = res_embed.text
+        response = session.get(url, headers=headers, timeout=10)
+        html = response.text
+        
+        # 1. Buscar enlaces directos de video (.mp4 o .m3u8) en el código fuente
+        match_video = re.search(r'https?://[^\s\'"]+\.(mp4|m3u8)', html)
+        if match_video:
+            return match_video.group(0)
+            
+        # 2. Si usa BeautifulSoup, buscar etiquetas <source> o reproductores comunes
+        soup = BeautifulSoup(html, 'html.parser')
+        source_tag = soup.find('source')
+        if source_tag and source_tag.get('src'):
+            return source_tag['src']
+            
+        # 3. Buscar URLs ocultas en scripts de reproducción o iframes
+        iframe_tag = soup.find('iframe')
+        if iframe_tag and iframe_tag.get('src'):
+            iframe_url = iframe_tag['src']
+            if not iframe_url.startswith('http'):
+                # Manejar URLs relativas si las hubiera
+                if iframe_url.startswith('//'):
+                    iframe_url = 'https:' + iframe_url
+            # Opcional: recursivo o lectura del iframe si es necesario
+            return iframe_url
 
-        match_pass = re.search(r"/pass_md5/[^'\"?]+", html_embed)
-        if not match_pass:
-            return None
-
-        pass_md5_path = match_pass.group(0)
-        parsed_domain = "/".join(url_embed.split("/")[:3])
-        token_endpoint = f"{parsed_domain}{pass_md5_path}"
-
-        res_token = session.get(token_endpoint, headers=headers, timeout=10)
-        base_cdn_url = res_token.text.strip()
-
-        rand_str = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
-        ts = int(time.time() * 1000)
-        token_id = pass_md5_path.split('/')[-1]
-
-        direct_stream_url = f"{base_cdn_url}{rand_str}?token={token_id}&expiry={ts}"
-        return direct_stream_url
-    except Exception:
+        return None
+    except Exception as e:
+        print(f"Error en extraccion: {str(e)}")
         return None
 
 @app.route('/ver')
@@ -52,7 +51,7 @@ def ver_pelicula():
     
     enlace_fresco = obtener_enlace_fresco(url_original)
     if enlace_fresco:
-        # Redirige al reproductor directo de la CDN con el token nuevo al instante
+        # Redirige al enlace directo o reproductor encontrado
         return redirect(enlace_fresco)
     else:
         return "Error al procesar el video", 500
