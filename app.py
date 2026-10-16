@@ -16,31 +16,27 @@ def obtener_enlace_fresco(url):
         response = session.get(url, headers=headers, timeout=10)
         html = response.text
         
-        # 1. Buscar enlaces directos de video (.mp4 o .m3u8) en el código fuente
-        match_video = re.search(r'https?://[^\s\'"]+\.(mp4|m3u8)', html)
+        # Imprimir un pedazo del HTML en los logs de Render para analizarlo
+        print("HTML obtenido (primeros 300 caracteres):", html[:300])
+        
+        # Buscar cualquier enlace dentro de scripts o etiquetas que parezca un stream
+        match_video = re.search(r'https?://[^\s\'"]+\.(mp4|m3u8|ts)', html)
         if match_video:
             return match_video.group(0)
             
-        # 2. Si usa BeautifulSoup, buscar etiquetas <source> o reproductores comunes
+        # Buscar si hay URLs en fuentes o iframes
         soup = BeautifulSoup(html, 'html.parser')
-        source_tag = soup.find('source')
-        if source_tag and source_tag.get('src'):
-            return source_tag['src']
-            
-        # 3. Buscar URLs ocultas en scripts de reproducción o iframes
-        iframe_tag = soup.find('iframe')
-        if iframe_tag and iframe_tag.get('src'):
-            iframe_url = iframe_tag['src']
-            if not iframe_url.startswith('http'):
-                # Manejar URLs relativas si las hubiera
-                if iframe_url.startswith('//'):
-                    iframe_url = 'https:' + iframe_url
-            # Opcional: recursivo o lectura del iframe si es necesario
-            return iframe_url
+        
+        # Buscar en todas las etiquetas script por enlaces de video
+        for script in soup.find_all('script'):
+            if script.string:
+                match_script = re.search(r'https?://[^\s\'"]+\.(mp4|m3u8)', script.string)
+                if match_script:
+                    return match_script.group(0)
 
         return None
     except Exception as e:
-        print(f"Error en extraccion: {str(e)}")
+        print(f"Excepción detallada: {str(e)}")
         return None
 
 @app.route('/ver')
@@ -51,7 +47,6 @@ def ver_pelicula():
     
     enlace_fresco = obtener_enlace_fresco(url_original)
     if enlace_fresco:
-        # Redirige al enlace directo o reproductor encontrado
         return redirect(enlace_fresco)
     else:
         return "Error al procesar el video", 500
