@@ -1,6 +1,7 @@
 from flask import Flask, request, redirect
 import re
 import requests
+import traceback
 from bs4 import BeautifulSoup
 
 app = Flask(__name__)
@@ -12,32 +13,21 @@ def obtener_enlace_fresco(url):
         'Referer': url
     }
     
-    try:
-        response = session.get(url, headers=headers, timeout=10)
-        html = response.text
+    response = session.get(url, headers=headers, timeout=10)
+    html = response.text
+    
+    match_video = re.search(r'https?://[^\s\'"]+\.(mp4|m3u8|ts)', html)
+    if match_video:
+        return match_video.group(0)
         
-        # Imprimir un pedazo del HTML en los logs de Render para analizarlo
-        print("HTML obtenido (primeros 300 caracteres):", html[:300])
-        
-        # Buscar cualquier enlace dentro de scripts o etiquetas que parezca un stream
-        match_video = re.search(r'https?://[^\s\'"]+\.(mp4|m3u8|ts)', html)
-        if match_video:
-            return match_video.group(0)
-            
-        # Buscar si hay URLs en fuentes o iframes
-        soup = BeautifulSoup(html, 'html.parser')
-        
-        # Buscar en todas las etiquetas script por enlaces de video
-        for script in soup.find_all('script'):
-            if script.string:
-                match_script = re.search(r'https?://[^\s\'"]+\.(mp4|m3u8)', script.string)
-                if match_script:
-                    return match_script.group(0)
+    soup = BeautifulSoup(html, 'html.parser')
+    for script in soup.find_all('script'):
+        if script.string:
+            match_script = re.search(r'https?://[^\s\'"]+\.(mp4|m3u8)', script.string)
+            if match_script:
+                return match_script.group(0)
 
-        return None
-    except Exception as e:
-        print(f"Excepción detallada: {str(e)}")
-        return None
+    raise ValueError(f"No se encontró enlace de video. Fragmento del HTML recibido: {html[:300]}")
 
 @app.route('/ver')
 def ver_pelicula():
@@ -45,11 +35,13 @@ def ver_pelicula():
     if not url_original:
         return "Falta el enlace de la película", 400
     
-    enlace_fresco = obtener_enlace_fresco(url_original)
-    if enlace_fresco:
+    try:
+        enlace_fresco = obtener_enlace_fresco(url_original)
         return redirect(enlace_fresco)
-    else:
-        return "Error al procesar el video", 500
+    except Exception as e:
+        # Esto imprimirá el error técnico completo directo en tu navegador
+        error_detallado = traceback.format_exc()
+        return f"<pre style='color: red; font-size: 16px;'>Ocurrió este error:\n\n{error_detallado}</pre>", 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
